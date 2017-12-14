@@ -65,6 +65,8 @@ struct parsV{
    int nfac;        // Number of factors;
    int nbase;       // Number of basis functions;
    cube fit;        // Current sub-level fit
+   mat BtB;         // Bs'Bs;
+   mat iBtB;        // pinv(Bs'Bs);
 };
 
 /************************************************************************************/
@@ -103,6 +105,9 @@ struct priorV{
   // spatial covs (IW)
   double aOm;
   mat Om0;
+  
+  // Latent factors;
+  vec eta0;
 };
 
 /************************************************************************************/
