@@ -162,9 +162,21 @@ mat cov2cor(mat S)
   for(int i=0; i<m; i++) D(i,i) = pow(S(i,i), -0.5);
   return D * S * D;
 }
-
-
-
-
+/***********************************************************************************/
+/* vec2mat()                                                                       */
+/* column-wise matricization                                                       */
+/***********************************************************************************/
+mat vec2mat(vec const &v, int const& nr, int const& nc)
+{
+  int i, j, index;
+  mat out(nr,nc);
+  for(j=0; j<nc; j++){
+    for(i=0; i<nr; i++){
+      index = nr*j+i;
+      out(i,j) = v[index];
+    }
+  }
+  return out;
+}
 
 

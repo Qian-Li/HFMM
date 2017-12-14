@@ -12,40 +12,40 @@
 /***********************************************************************************/
 /* STRUCTURES & GLOBAL VARIABLES ***************************************************/
 /***********************************************************************************/
-dta dat;                      // Data summaries
-parsV th;                     // Parameters
+dta datv;                   // Data summaries
+parsV thv;                  // Parameters
 // ergodics hat;              // Ergodic summaries
-// prior pr;                  // Prior parameters
-// vec yir, bir;              // Global subj/region data/pars
+priorV prv;                  // Prior parameters
+vec yvec, bvec;             // Global subj/region data/pars
 //
 // // Utility constants
 // double w1;
 // double w2;
-// // Output files ------------------------------------------------------------------
-// ofstream out1;              // Beta
-// ofstream out2;              // Precision
-// ofstream out3;              // LF's
-//
-//
+// Output files ------------------------------------------------------------------
+ofstream outv1;              // B-spline coeffs bi's
+ofstream outv2;              // betas (group mean coeffs)
+ofstream outv3;              // precisions
+ofstream outv4;              // latent factors
+
 /***********************************************************************************/
 /* completeY()                                                                     */
 /***********************************************************************************/
-void completeY(cube &y, mat const& Bs)
+void completeY2(cube &y, mat const& Bs)
 {
-//   int i, r, j;
-//   vec yn;
-//   //
-//   for(r=0; r<dat.nr; r++){
-//     for(i=0; i<dat.ns; i++){
-//       yir = y.tube(i,r);
-//       for(j=0; j<dat.nt; j++){
-//         if(dat.miss(i,r,j) == 1){
-//           yn = randn(1);
-//           y(i,r,j) = th.fit(i,r,j) + yn(0) * std::pow(th.He(r,r), -0.5);
-//         }
-//       }
-//     }
-//   }
+  int i, r, j;
+  vec yn;
+  //
+  for(r=0; r<datv.nr; r++){
+    for(i=0; i<datv.ns; i++){
+      yvec = y.tube(i,r);
+      for(j=0; j<datv.nt; j++){
+        if(datv.miss(i,r,j) == 1){
+          yn = randn(1);
+          y(i,r,j) = thv.fit(i,r,j) + yn(0) * std::pow(thv.sige, -0.5);
+        }
+      }
+    }
+  }
 }
 
 /***********************************************************************************/
@@ -53,12 +53,66 @@ void completeY(cube &y, mat const& Bs)
 /***********************************************************************************/
 void sampleLoadings()
 {// Sample Lambdam Omega, delta | Theta, M, SigP, SigQ, Fac
-  // block update of lambda;
-
-  // update of Omega
-
+  int k, l, i, j;
+  vec lfvec, tau, invp, b, thdif, samp;
+  mat S, Sp, sampM, W;
+  double tt;
+  //
+  //
+  double nu = prv.aOm + thv.nfac;
+  // ---- Global* vars
+  cube cdif = thv.bi - thv.mbi;
+  // invp = Sigma_p^-1
+  invp = 1.0/diagvec(thv.Sigp);
+  // tau = prod pen's
+  tau = 1.0 / cumprod(thv.pen);
+  mat T = diagmat(tau);
+  for(k=0; k<thv.nbase; k++){
+    thdif = vectorise(longslice(cdif, k));
+    Sp = diagmat(1.0 / thv.Sigq(k,k) * invp);
+    S = kron(T,inv(thv.Omega.slice(k))) + kron(Sp, thv.HtH);
+    b = kron(diagmat(1.0 / thv.Sigq(k,k) * invp), thv.H.t()) * thdif;
+    // Sample loadings;
+    samp = BayesReg(b, S);
+    // Matricize;
+    sampM = vec2mat(samp, datv.nr, thv.nfac);
+    // Update Loading matrix --------------------------------------------------------
+    thv.Ld.submat(k*datv.nr, (k+1)*datv.nr-1, 0, thv.nfac) = sampM;
+    // Update Omega -----------------------------------------------------------------
+    W = prv.Om0 + sampM * T * sampM.t();
+    thv.Omega.slice(k) = rWish(W, nu);
+  }
   // shrinkage update
-
+  // delta0;
+  {
+    double a1 = prv.ap1 + datv.nr * thv.nbase * thv.nfac * 0.5;
+    double a2 = 1.0;
+    for(i=0; i<thv.nfac; i++){
+      vec copy = thv.pen; copy[0] = 1.0;
+      tau = cumprod(copy);
+      for(j=0; j<thv.nbase; j++){
+        mat tempvec = thv.Ld.submat(j*datv.nr, (j+1)*datv.nr-1, i,i);
+        mat tempsum = tempvec.t() * thv.Omega.slice(j) * tempvec;
+        a2 += 0.5*tau[j]* tempsum[0];
+      }
+    }
+    thv.pen[0] = Rf_rgamma(a1, a2);
+  }
+  // delta1+;
+  for(l=1; l<thv.nfac; l++){
+    double a1 = prv.ap2 + datv.nr * thv.nbase * (thv.nfac-l) * 0.5;
+    double a2 = 1.0;
+    for(i=0; i<thv.nfac; i++){
+      vec copy = thv.pen; copy[l] = 1.0;
+      tau = cumprod(copy);
+      for(j=0; j<thv.nbase; j++){
+        mat tempvec = thv.Ld.submat(j*datv.nr, (j+1)*datv.nr-1, i,i);
+        mat tempsum = tempvec.t() * thv.Omega.slice(j) * tempvec;
+        a2 += 0.5*tau[j]* tempsum[0];
+      }
+    }
+    thv.pen[l] = Rf_rgamma(a1, a2);
+  }
 }
 
 /***********************************************************************************/
@@ -164,22 +218,15 @@ void sampleFactors()
 /***********************************************************************************/
 
 // [[Rcpp::export]]
-void vmix_mcmc(
+void vmix_mcmc(arma::cube y, 
+               arma::mat const& X, 
+               arma::mat const& Bs,
                int const& burnin, int const& nsim, int const& thin
                )
 {
-  // arma::cube y,
-  // arma::mat const& X,
-  // arma::mat const& Bs,
-  // List vmix_mcmc(arma::cube y,
-  //                arma::mat const& X,
-  //                arma::mat const& Bs,
-  //                int  const& burnin, int const& nsim, int const& thin,
-  //                bool const& spatial = true)
-//
 //   int i, j, r;                // Indices
 //   mat W, D, D2;               // AR matrices
-//   vec rho;                    // regularization eigenvalue
+//   vec rho;                    // regularization eigenvalues
 //   // Get initialization summaries ---------------------------------------------------
 //   dat.ns = y.n_rows;           // number of subjects
 //   dat.nr = y.n_cols;           // number of regions
@@ -295,7 +342,7 @@ void vmix_mcmc(
 
   for(int rep=0; rep<(nsim+burnin+1); rep++){
     // mcmc samples --------------------
-    // completeY(y, Bs);
+    completeY2(y, Bs);
     sampleLoadings();
     sampleFacCovs();
     sampleErrCovs();

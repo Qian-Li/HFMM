@@ -60,9 +60,11 @@ struct parsV{
    cube Omega;      // Spatial covariance, free
    vec pen;         // Column covariance penalty on Loadings
    double sige;     // System error variances
+   mat HtH;         // H'H
    // Static Summaries --------------------------------------------------------------
    int nfac;        // Number of factors;
    int nbase;       // Number of basis functions;
+   cube fit;        // Current sub-level fit
 };
 
 /************************************************************************************/
@@ -120,15 +122,19 @@ struct ergodics{
 vec BayesReg(vec const &b, mat const &Q);
 vec BayesRegL(vec const &b, mat const &L);
 void trisolve(vec &solution, mat const &L, vec const &x, bool const &lower);
+// Multivariate Samplers
 mat rWish(mat const &S, double v);
 mat rMN(mat const &m, mat const &S, mat const& V);
+// Other utilities
 mat cov2cor(mat S);
+double meanNA(vec &y);
+mat vec2mat(vec const &v, int const& nr, int const& nc);
 //
 // slicing of Armadillo cubes ---------------------------
 mat longslice(cube &A, int r);
 mat flatslice(cube &A, int r);
 //
-double meanNA(vec &y);
-
+// shared functions among different implementations
+void completeY(cube &y, mat const& Bs);
 
 #endif
