@@ -1,0 +1,130 @@
+---
+title: "HFMM Model Fitting"
+author: "Qian Li"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+In this writeup, we compare three modelling strategies:
+
+- Strongly separable model
+- Vectorized Latent Factor model
+- Sandwich Latent Factor model
+
+## Simulation Setups
+We simulate the band powers over 6 regions, that has a predetermined AR(1) covariance structure.
+```{r}
+# ------- Simulation parameters ----------
+nsub <-       10          # Number of subjects per group
+ind.smooth <- 2           # Smoothness of the GP, ++ for smoother deviation
+ind.var <-    .8          # Variance of the GP (SNR related)
+noise.var <-  1           # Variance of the error term (SNR related)
+mis.p <-      .4          # Missing probability for each time point
+AR.rho <-     .8          # Rho for the AR cov in simulation
+num.knots <-  10          # Number of knots
+# ---------------------------------------------------------------------------+
+# To knit: rmarkdown::render('vignettes/fit-test.Rmd')
+```
+
+```{r, include = FALSE, warning=FALSE}
+### Loading Required packages
+require(Matrix); require(MASS); require(reshape2); require(ggplot2)
+require(lattice); library(HFMM); require(pander)
+### Curves and time
+time <- seq(0,30, by = .5)
+curves <- list(
+  curve0 = function(x) {rep(1, length(x))},
+  curve1 = function(x) {5 * sin(x * pi / 60)},
+  curve2 = function(x) {2 - 3 * cos((x - 25) * pi / 15)},
+  curve3 = function(x) {5 - 0.2 * x},
+  curve4 = function(x) {-1 + (20 - x) ^ 2 / 100}
+)
+## Cov: AR(1)
+cov <- abs(outer(1:6,1:6,"-")); sp_cov <- AR.rho ^ cov; chol_sp <- chol(sp_cov)
+## Group means
+gcurves <- list()
+gcurves[[1]] <- lapply(curves[c(1,1,1,1,1,1)], function(f) f(time))
+gcurves[[2]] <- lapply(curves[c(2,2,2,3,3,4)], function(f) f(time))
+gcurves[[3]] <- lapply(curves[c(3,4,5,4,5,5)], function(f) f(time))
+gcurves <- lapply(gcurves, function(x) matrix(unlist(x), ncol = 6, byrow = F))
+## Gaussian Process covariance
+# GP.cov <- outer(time, time, "-"); GP.cov <- exp(-1/2 * (abs(GP.cov)/ind.smooth)^2)
+GP.cov <- HFMM::calcSigma(time, time, l = ind.smooth)
+## Missing labels (const)
+p <- rep(mis.p,nsub*3*length(time)); p <- (runif(length(p)) >= p)
+p <- split(p, rep(1:(nsub*3),rep(length(time),nsub*3)))
+## Covariates and simulation settings
+sim_time <- unlist(lapply(p, function(x) time[x]))
+sim_nsegs <- unname(unlist(lapply(p, sum)))
+sim_group <- rep(c(1,2,3), rep(nsub,3))
+sim_knots <- default.knots(sim_time, num.knots = num.knots)
+```
+
+### Simulated Group Means for 6 Regions.
+```{r, echo = FALSE, fig.height=4, fig.width=6}
+par(mfrow = c(2,3), mar = c(1,1,3,1))
+for(i in 1:6){
+  matplot(time,matrix(unlist(lapply(gcurves, function(x) x[,i])), ncol = 3), type='l', lwd = 2, xlab = '', main = paste0("Region ",i), col = c('blue','black','red'))
+}   
+```
+
+Within each region, the group means are selected from a pool of predetermined curves:
+
+$$
+\beta_0(t) = 1; \quad \beta_1(t) = 5\cdot\sin(t*\pi/60); \quad \beta_2(t) =  2-3\cdot \cos((t-25)*\pi/15)\\
+\beta_3(t) = 5-0.2t;\quad  \beta_4(t) = -1+(20-t)^2/100,
+$$
+therefore, 
+
+* $\text{Region 1}:\{\beta_0(t), \beta_1(t), \beta_2(t)\}$
+* $\text{Region 2}:\{\beta_0(t), \beta_1(t), \beta_3(t)\}$
+* $\text{Region 3}:\{\beta_0(t), \beta_1(t), \beta_4(t)\}$
+* $\text{Region 4}:\{\beta_0(t), \beta_2(t), \beta_3(t)\}$
+* $\text{Region 5}:\{\beta_0(t), \beta_2(t), \beta_4(t)\}$
+* $\text{Region 6}:\{\beta_0(t), \beta_3(t), \beta_4(t)\}$
+
+```{r, echo = FALSE, fig.width=8, fig.height=8}
+complete_data <- list()
+for(g in 1:3){
+  for(sub in 1:nsub){
+    index <- sub + (g-1) * nsub
+    bij <- mvrnorm(6,rep(0,length(time)), Sigma = GP.cov*ind.var)
+    complete_data[[index]] <- gcurves[[g]] + t(bij) %*% chol_sp + 
+      t(mvrnorm(6,rep(0,length(time)), Sigma = noise.var*diag(length(time))))
+  }
+}
+
+for(i in 1:length(complete_data)) complete_data[[i]] <- complete_data[[i]][p[[i]],]
+
+## Model 1 fit
+# X <- matrix(0, nrow=length(sim_group), ncol=3)
+# X[sim_group==1,1] <- 1
+# X[sim_group==2,2] <- 1
+# X[sim_group==3,3] <- 1
+# mc1 <- list(burnin = 1000, nsim = 5000, thin = 2)
+# sim_fit <- hfm(sim_data, sim_time, X, nsegs=sim_nsegs, knots=sim_knots, mcmc=mc1)
+## Model 2 fit
+
+## Model 3 fit
+```
+
+## Fitting Visualization, sub-region curves
+```{r, echo = FALSE, fig.width=9, fig.height=9}
+par(mfrow=c(3,3))
+# tt <- sort(unique(as.vector(sim_time)))/30;
+sampID <- c();  for(g in 1:3) sampID <- c(sampID, sample(nsub,1)+(g-1)*nsub)
+for(i in sampID){
+  for(j in c(1,3,6)){
+    plot(time[p[[i]]], complete_data[[i]][,j], cex = 0.8, xlab = 'Time', ylab = 'Signal')
+    # plot(sim_fit$t[i,],sim_fit$y[i,j,], cex=0.8, xlab='Normalized Time', ylab='Signal')
+    title(paste(paste("Subject", i, "-"), paste("Region", j)))
+    # lines(tt,sim_fit$fit[i,j,], col=4)
+  }
+}
+```
+
+## Fitting Visualization, group-region curves

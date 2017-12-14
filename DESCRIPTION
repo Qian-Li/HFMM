@@ -1,0 +1,11 @@
+Package: HFMM
+Type: Package
+Title: Prototype Hierarchical Functional Mixed Model 
+Version: 1.0
+Date: 2017-12-12
+Author: Qian
+Maintainer: Qian Li <qianl@ucla.edu>
+Description: Later on
+License: What license is it under?
+Imports: Rcpp (>= 0.12.14)
+LinkingTo: Rcpp, RcppArmadillo
