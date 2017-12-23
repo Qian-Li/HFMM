@@ -17,7 +17,7 @@ ergodicsV hatv;                   // Ergodic summaries
 priorV    prv;                    // Prior parameters
 vec       vbi;                    // vbi as vec(bi)
 mat       Sinv;                   // Sigma^{-1} of size pq*pq
-double    g = 100;                // Mean Prior constant, set large
+double    g = 100.0;              // Mean Prior constant, set large
 //
 // Utility constants
 //
@@ -56,7 +56,8 @@ void sampleLoadings()
 {// Sample Lambda, Omega, delta | Theta, M, SigP, SigQ, Fac
   int k, l;
   vec samp, tau, b, copy;
-  mat Sp, sampM, W, T;
+  mat Sp, sampM, W, T, sch;
+  bool sinv;
   // cumsum for penalty update
   vec bg = 1.0 * ones<vec>(thv.nfac);
   //
@@ -71,19 +72,33 @@ void sampleLoadings()
     Sinv= Sinv + kron(thv.HtH, Sp);
     b   = kron(trans(thv.H), Sp) * vbi;
     // Sample loadings, pm * 1
-    samp = BayesReg(b, Sinv);
+    sinv= chol(sch, Sinv, "lower");
+    Rcout << "ok 2.1" << std::endl;
+    if(!sinv){
+      thv.pen.print("penalty:");
+      T.print("T:");
+      thv.Omega.slice(k).print("Omega:");
+      Sp.print("Sp:");
+    }
+    samp = BayesRegL(b, sch);
+    Rcout << "ok 2.2" << std::endl;
     // Matricize; p*m
     sampM = vec2mat(samp, datv.nr, thv.nfac);
+    Rcout << "ok 2.3" << std::endl;
     // Update Loading matrix ---------------------------------------------------- /
     vec2long(thv.Ld, samp, k);
+    Rcout << "ok 2.4" << std::endl;
     // Update Omega --------------------------------------------------------------/
     W = prv.Om0 + sampM * T * trans(sampM);
     thv.Omega.slice(k) = rWish(W, nu);
+    Rcout << "ok 2.5" << std::endl;
     // Update cumsum for penalties
     for(l=0; l<thv.nfac; l++){
       copy = thv.pen;     copy[l] = 1.0;
       tau = cumprod(copy);    T = diagmat(tau);
-      bg[l] += 0.5 * trace(T * trans(sampM) * thv.Omega.slice(k) * sampM);
+      bg[l] += 0.5 * trace(T.submat(l,l,thv.nfac-1,thv.nfac-1) * 
+          trans(sampM.cols(l, thv.nfac-1)) * 
+          thv.Omega.slice(k) * sampM.cols(l, thv.nfac-1));
     }
   }
   // shrinkage(penalty) update
@@ -135,7 +150,7 @@ void sampleFacCovs()
 void sampleErrCovs(cube &y)
 {// Sample sige | Yi, Theta
   int i, r, t;
-  double a, b, v, resb;
+  double a, b;
   vec  h1;
   mat  resE, bi, mi, betar, S;
   
@@ -184,30 +199,35 @@ void sampleBetas() // needs to be figured out
 void sampleFactors(cube &y, mat const& Bs)
 {// Sample factors | everything else;
   int i, r, t;
-  mat lmat, res, Q, Stinv, Sipq, fit;
+  mat lmat, res, Q, Stinv, Sipq, fit, qch, sch;
   cube LFcube;
-  vec b, bi, thi;
+  vec b, bi, thi, bsamp;
+  bool decom1, decom2;
   //
   lmat = cube2mat(thv.Ld);
   LFcube= cubexmat(thv.Ld, thv.H);
   Sinv = kron(pinv(thv.tauq), pinv(thv.taup));
   Sinv = Sinv + kron((thv.iBtB), 1.0/thv.taue*eye<mat>(datv.nr, datv.nr));
   Q = trans(lmat) * pinv(Sinv) * lmat + 1.0 * eye<mat>(thv.nfac, thv.nfac); ////could be improved by performing CHOL here
-  Q.print("Q");
+  decom1 = chol(qch, Q, "lower");
   Sipq = kron(thv.taup, thv.tauq);
   Stinv= Sipq + kron(thv.taue * eye<mat>(datv.nr, datv.nr), thv.BtB);
+  decom2 = chol(sch, Stinv, "lower");
+  if(!decom1){Q.print();}
+  if(!decom2){Stinv.print();}
   //
   for(i=0; i<datv.ns; i++){
     //residual of pq
     res = (flatslice(y,i) * Bs * thv.iBtB - thv.mbi.slice(i));
     b   = prv.eta0 + trans(lmat) * pinv(Sinv) * conv_to<colvec>::from(vectorise(res));
     // Sample latent Factors;--------------------------------------------------------/
-    thv.H.row(i) = conv_to<rowvec>::from(BayesReg(b,Q));
+    bsamp   = BayesRegL(b,qch);
+    thv.H.row(i) = conv_to<rowvec>::from(bsamp);
     // residual of Theta_i
     bi  = vectorise(thv.taue * trans(Bs) * trans(flatslice(y,i)));
     bi  = bi + Sipq * vectorise(trans(thv.mbi.slice(i) + LFcube.slice(i)));
     // Sample coefficient matrices --------------------------------------------------/
-    thi = BayesReg(bi, Stinv);
+    thi = BayesRegL(bi, sch);
     // Update bi = Theta_i - mbi
     thv.bi.slice(i) = trans(vec2mat(thi, thv.nbase, datv.nr)) - thv.mbi.slice(i);
     fit = (thv.bi.slice(i)+thv.mbi.slice(i)) * trans(Bs);       //p*nt      
@@ -404,12 +424,19 @@ List vmix_mcmc(arma::cube y,
 
   for(int rep=0; rep<(nsim+burnin+1); rep++){
     // mcmc samples --------------------
+    Rcout << "ok 1" << std::endl;
     completeY2(y);
+    Rcout << "ok 2" << std::endl;
     sampleLoadings();
+    Rcout << "ok 3" << std::endl;
     sampleFacCovs();
+    Rcout << "ok 4" << std::endl;
     sampleErrCovs(y);
+    Rcout << "ok 5" << std::endl;
     sampleBetas();
+    Rcout << "ok 6" << std::endl;
     sampleFactors(y, Bs);
+    Rcout << "ok 7" << std::endl;
     // Store mcmc samples --------------
     if( (rep > burnin) && (rep%thin == 0) ){
       OutputSampleV();           // Write mcmc samples to file
