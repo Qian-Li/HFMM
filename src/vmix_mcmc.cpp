@@ -1,150 +1,134 @@
 #include "EEGpal.h"
-
+//
 /***********************************************************************************/
 /* FILES & CONSTANTS ***************************************************************/
 /***********************************************************************************/
-#define fileOutput1 "post_v/bi.txt"               //coeffs per subject
-#define fileOutput2 "post_v/beta.txt"             //betas
-#define fileOutput3 "post_v/precision.txt"        //tau's
-#define fileOutput4 "post_v/factors.txt"          //latent factors
-
-
+#define fileOutput1 "post_v/beta.txt"             //fixed-effects related coeffs
+#define fileOutput2 "post_v/precision.txt"        //sigP,sigq and sige^-1
+// #define fileOutput3 "post_v/spatial"              //Omega's
+#define fileOutput4 "post_v/factors.txt"          //factors and penalties
+//
 /***********************************************************************************/
 /* STRUCTURES & GLOBAL VARIABLES ***************************************************/
 /***********************************************************************************/
-dta datv;                   // Data summaries
-parsV thv;                  // Parameters
-// ergodics hat;              // Ergodic summaries
-priorV prv;                  // Prior parameters
-vec yvec, bvec;             // Global subj/region data/pars
+dta       datv;                   // Data summaries
+parsV     thv;                    // Parameters
+ergodicsV hatv;                   // Ergodic summaries
+priorV    prv;                    // Prior parameters
+vec       vbi;                    // vbi as vec(bi)
+mat       Sinv;                   // Sigma^{-1} of size pq*pq
+double    g = 100;                // Mean Prior constant, set large
 //
-// // Utility constants
-// double w1;
-// double w2;
+// Utility constants
+//
+vec bit, yit;
+double ww1, ww2;                    // For Ergodic updates
 // Output files ------------------------------------------------------------------
-ofstream outv1;              // B-spline coeffs bi's
-ofstream outv2;              // betas (group mean coeffs)
-ofstream outv3;              // precisions
-ofstream outv4;              // latent factors
-
+ofstream outv1;
+ofstream outv2;
+// ofstream outv3;
+ofstream outv4;
+//
 /***********************************************************************************/
-/* completeY()                                                                     */
+/* completeY2()                                                                    */
 /***********************************************************************************/
-void completeY2(cube &y, mat const& Bs)
+void completeY2(cube &y)
 {
   int i, r, j;
-  vec yn;
+  vec yn(1);
   //
   for(r=0; r<datv.nr; r++){
     for(i=0; i<datv.ns; i++){
-      yvec = y.tube(i,r);
       for(j=0; j<datv.nt; j++){
         if(datv.miss(i,r,j) == 1){
           yn = randn(1);
-          y(i,r,j) = thv.fit(i,r,j) + yn(0) * std::pow(thv.sige, -0.5);
+          y(i,r,j) = thv.fit(i,r,j) + yn[0] * std::pow(thv.taue, -0.5);
         }
       }
     }
   }
 }
-
+//
 /***********************************************************************************/
 /* sampleLoadings()                                                                */
 /***********************************************************************************/
 void sampleLoadings()
-{// Sample Lambdam Omega, delta | Theta, M, SigP, SigQ, Fac
-  int k, l, i, j;
-  vec lfvec, tau, invp, b, thdif, samp;
-  mat S, Sp, sampM, W;
-  double tt;
-  //
+{// Sample Lambda, Omega, delta | Theta, M, SigP, SigQ, Fac
+  int k, l;
+  vec samp, tau, b, copy;
+  mat Sp, sampM, W, T;
+  // cumsum for penalty update
+  vec bg = 1.0 * ones<vec>(thv.nfac);
   //
   double nu = prv.aOm + thv.nfac;
-  // ---- Global* vars
-  cube cdif = thv.bi - thv.mbi;
-  // invp = Sigma_p^-1
-  invp = 1.0/diagvec(thv.Sigp);
   // tau = prod pen's
-  tau = 1.0 / cumprod(thv.pen);
-  mat T = diagmat(tau);
+  tau = cumprod(thv.pen);
+  T = diagmat(tau);
   for(k=0; k<thv.nbase; k++){
-    thdif = vectorise(longslice(cdif, k));
-    Sp = diagmat(1.0 / thv.Sigq(k,k) * invp);
-    S = kron(T,pinv(thv.Omega.slice(k))) + kron(Sp, thv.HtH);
-    b = kron(diagmat(1.0 / thv.Sigq(k,k) * invp), trans(thv.H)) * thdif;
-    // Sample loadings;
-    samp = BayesReg(b, S);
-    // Matricize;
+    vbi = vectorise(longslice(thv.bi, k));
+    Sp  = thv.taup * thv.tauq(k,k);
+    Sinv= kron(T, thv.Omega.slice(k));
+    Sinv= Sinv + kron(thv.HtH, Sp);
+    b   = kron(trans(thv.H), Sp) * vbi;
+    // Sample loadings, pm * 1
+    samp = BayesReg(b, Sinv);
+    // Matricize; p*m
     sampM = vec2mat(samp, datv.nr, thv.nfac);
     // Update Loading matrix ---------------------------------------------------- /
-    thv.Ld.submat(k*datv.nr, (k+1)*datv.nr-1, 0, thv.nfac) = sampM;
+    vec2long(thv.Ld, samp, k);
     // Update Omega --------------------------------------------------------------/
     W = prv.Om0 + sampM * T * trans(sampM);
     thv.Omega.slice(k) = rWish(W, nu);
+    // Update cumsum for penalties
+    for(l=0; l<thv.nfac; l++){
+      copy = thv.pen;     copy[l] = 1.0;
+      tau = cumprod(copy);    T = diagmat(tau);
+      bg[l] += 0.5 * trace(T * trans(sampM) * thv.Omega.slice(k) * sampM);
+    }
   }
-  // shrinkage update
+  // shrinkage(penalty) update
   // delta0;----------------------------------------------------------------------/
   {
     double a1 = prv.ap1 + datv.nr * thv.nbase * thv.nfac * 0.5;
-    double a2 = 1.0;
-    for(i=0; i<thv.nfac; i++){
-      vec copy = thv.pen; copy[0] = 1.0;
-      tau = cumprod(copy);
-      for(j=0; j<thv.nbase; j++){
-        mat tempvec = thv.Ld.submat(j*datv.nr, (j+1)*datv.nr-1, i,i);
-        mat tempsum = trans(tempvec) * thv.Omega.slice(j) * tempvec;
-        a2 += 0.5*tau[j]* tempsum[0];
-      }
-    }
-    thv.pen[0] = Rf_rgamma(a1, 1.0/a2);
+    thv.pen[0] = Rf_rgamma(a1, 1.0/bg[0]);
   }
   // delta1+;---------------------------------------------------------------------/
   for(l=1; l<thv.nfac; l++){
     double a1 = prv.ap2 + datv.nr * thv.nbase * (thv.nfac-l) * 0.5;
-    double a2 = 1.0;
-    for(i=0; i<thv.nfac; i++){
-      vec copy = thv.pen; copy[l] = 1.0;
-      tau = cumprod(copy);
-      for(j=0; j<thv.nbase; j++){
-        mat tempvec = thv.Ld.submat(j*datv.nr, (j+1)*datv.nr-1, i,i);
-        mat tempsum = trans(tempvec) * thv.Omega.slice(j) * tempvec;
-        a2 += 0.5*tau[j]* tempsum[0];
-      }
-    }
-    thv.pen[l] = Rf_rgamma(a1, 1.0/a2);
+    thv.pen[l] = Rf_rgamma(a1, 1.0/bg[l]);
   }
 }
-
+//
 /***********************************************************************************/
 /* sampleFacCovs()                                                                 */
 /***********************************************************************************/
 void sampleFacCovs()
 {// Sample SigQ, Sigp | Theta, Lambda H
   double  ap, aq;
-  mat     lat;
+  cube    res;
   vec     bp(datv.nr), bq(thv.nbase);
   int     i, j, k;
-  lat = thv.Ld * trans(thv.H);                  //pq * n latent RE's
+  //
+  res = thv.bi - cubexmat(thv.Ld, thv.H);               //Theta_i-M_i-mat(Lambda*H)
   {
     ap = prv.athe + 0.5 * datv.ns * thv.nbase;
     aq = prv.athe + 0.5 * datv.ns * datv.nr;
     bp.fill(prv.bthe);
     bq.fill(prv.bthe);
-    mat sum;
+    mat sump, sumq;
     for(i=0; i<datv.ns; i++){
-      vec latvi=conv_to<vec>::from(lat.col(i));
-      mat lati = vec2mat(latvi, datv.nr, thv.nbase);
-      mat diff = thv.bi.slice(i) - latvi;       // p*q diff
-      bp += 0.5 * diagvec(diff * pinv(thv.Sigq) * trans(diff));
-      bq += 0.5 * diagvec(trans(diff) * pinv(thv.Sigp) * diff);
+      sump = res.slice(i) * thv.tauq * trans(res.slice(i));
+      sumq = trans(res.slice(i)) * thv.taup * res.slice(i);
+      bp += 0.5 * diagvec(sump);
+      bq += 0.5 * diagvec(sumq);
     }
   }
   // Sample col covs SigP;---------------------------------------------------------/
-  for(j=0; j<datv.nr; j++){thv.Sigp(j,j) = 1.0/Rf_rgamma(ap, 1.0/bp[j]);}
+  for(j=0; j<datv.nr; j++){thv.taup(j,j) = Rf_rgamma(ap, 1.0/bp[j]);}
   // Sample row covs SigQ;---------------------------------------------------------/
-  for(k=0; k<thv.nbase; k++){thv.Sigq(k,k) = 1.0/Rf_rgamma(aq, 1.0/bq[k]);}
+  for(k=0; k<thv.nbase; k++){thv.tauq(k,k) = Rf_rgamma(aq, 1.0/bq[k]);}
 }
-
+//
 /***********************************************************************************/
 /* sampleErrCovs()                                                                 */
 /***********************************************************************************/
@@ -156,29 +140,42 @@ void sampleErrCovs(cube &y)
   mat  resE, bi, mi, betar, S;
   
   b    = prv.be;
-  a = (datv.ns*datv.nt-accu(datv.nmiss))/2.0*datv.nr + prv.ae;
+  a    = prv.ae + (datv.ns*datv.nt-accu(datv.nmiss)) * 0.5 * datv.nr;
   
-  // Error precision ---------------------
+  // Error sum of squares ---------------------
   for(r=0; r<datv.nr; r++){
     // a
     resE = longslice(y, r) - longslice(thv.fit, r);
     // b
     for(i=0; i<datv.ns; i++){
       for(t=0; t<datv.nt; t++){
-        b += (datv.miss(i,r,t)==0)? std::pow(resE(i,t),2.0) : 0.0;
+        b += 0.5 * ((datv.miss(i,r,t)==0)? std::pow(resE(i,t),2.0) : 0.0);
       }
     }
   }
   //sample residual covariances;----------------------------------------------------/
-  thv.sige = 1.0/Rf_rgamma(a, 1.0/b);
+  thv.taue = Rf_rgamma(a, 1.0/b);
 }
-
+//
 /***********************************************************************************/
 /* sampleBetas()                                                                   */
 /***********************************************************************************/
 void sampleBetas() // needs to be figured out
-{// Sample M = B'xi; B| Sigma, Theta, X--------------------------------------------------------*****************************
-  
+{// Sample M = B'xi; B| Sigma, Theta, X
+  mat S, V, Theta, Bn, Bsamp;
+  mat Lmat = cube2mat(thv.Ld);        //pq*m
+  Theta = cube2mat(thv.mbi+thv.bi);   //pq*n
+  //
+  S = g / (g+1.0) * thv.XtXi;
+  V = kron(pinv(thv.tauq), pinv(thv.taup));
+  V = V + Lmat * trans(Lmat);
+  //
+  Bn = S * trans(thv.X) * trans(Theta); 
+  //sample population means: beta;-------------------------------------------------/
+  Bsamp = rMN(Bn, S, V);                                 // pq*d
+  thv.beta = mat2cube(trans(Bsamp), datv.nr, thv.nbase); // p*q*d
+  // Update mbi based on beta------------------------------------------------------/
+  thv.mbi = cubexmat(thv.beta, thv.X);                   // p*q*n
 }
 
 /***********************************************************************************/
@@ -186,54 +183,76 @@ void sampleBetas() // needs to be figured out
 /***********************************************************************************/
 void sampleFactors(cube &y, mat const& Bs)
 {// Sample factors | everything else;
-  int i;
-  mat res, Q, iSig, Qth;
-  vec b, bi;
-  
-  iSig = pinv(kron(thv.Sigp, thv.Sigq) + kron(eye(datv.nr, datv.nr), thv.iBtB));
+  int i, r, t;
+  mat lmat, res, Q, Stinv, Sipq, fit;
+  cube LFcube;
+  vec b, bi, thi;
+  //
+  lmat = cube2mat(thv.Ld);
+  LFcube= cubexmat(thv.Ld, thv.H);
+  Sinv = kron(pinv(thv.tauq), pinv(thv.taup));
+  Sinv = Sinv + kron((thv.iBtB), 1.0/thv.taue*eye<mat>(datv.nr, datv.nr));
+  Q = trans(lmat) * pinv(Sinv) * lmat + 1.0 * eye<mat>(thv.nfac, thv.nfac); ////could be improved by performing CHOL here
+  Q.print("Q");
+  Sipq = kron(thv.taup, thv.tauq);
+  Stinv= Sipq + kron(thv.taue * eye<mat>(datv.nr, datv.nr), thv.BtB);
+  //
   for(i=0; i<datv.ns; i++){
-    Q = trans(thv.Ld) * iSig * thv.Ld + eye(thv.nfac, thv.nfac);
     //residual of pq
-    res = (y.slice(i) - thv.mbi.slice(i) * trans(Bs)) * Bs * thv.iBtB;
-    b = prv.eta0 + trans(thv.Ld) * iSig * conv_to<colvec>::from(vectorise(res));
+    res = (flatslice(y,i) * Bs * thv.iBtB - thv.mbi.slice(i));
+    b   = prv.eta0 + trans(lmat) * pinv(Sinv) * conv_to<colvec>::from(vectorise(res));
     // Sample latent Factors;--------------------------------------------------------/
     thv.H.row(i) = conv_to<rowvec>::from(BayesReg(b,Q));
-    // Update thv.mbi!!!!! --------------------------------------------------------*****************************
-    
+    // residual of Theta_i
+    bi  = vectorise(thv.taue * trans(Bs) * trans(flatslice(y,i)));
+    bi  = bi + Sipq * vectorise(trans(thv.mbi.slice(i) + LFcube.slice(i)));
     // Sample coefficient matrices --------------------------------------------------/
-    Qth = (1.0/thv.sige * kron(eye(datv.nr, datv.nr), thv.BtB))
-      + pinv(kron(thv.Sigp, thv.Sigq));
-    thv.bi.slice(i) = vec2mat(BayesReg(vectorise(thv.mbi.slice(i)), Qth), 
-                 datv.nr, thv.nbase);
-    // Update thv.fit!!!!--------------------------------------------------------*****************************
-    
+    thi = BayesReg(bi, Stinv);
+    // Update bi = Theta_i - mbi
+    thv.bi.slice(i) = trans(vec2mat(thi, thv.nbase, datv.nr)) - thv.mbi.slice(i);
+    fit = (thv.bi.slice(i)+thv.mbi.slice(i)) * trans(Bs);       //p*nt      
+    // Update fit_i = Theta_i * Bs'
+    for(r=0; r<datv.nr; r++){
+      for(t=0; t<datv.nt; t++){
+        thv.fit(i,r,t) = fit(r,t);
+      }
+    }
   }
   // Update H'H;
   thv.HtH = trans(thv.H) * thv.H;
 }
-
-// Thinking on what to record
-// /***********************************************************************************/
-// /* ErgodicAverages()                                                               */
-// /***********************************************************************************/
-// void ErgodicAverages(mat const& Bs)
-// {
-//   int r;
-//   mat beta, betat;
 //
-//   w1 = 1.0/(1.0 + hat.n);
-//   w2 = 1.0 - w1;
-//   hat.n++;
-//   // Average fit ------------------------------------------
-//   hat.fit  = w1*th.fit + w2*hat.fit;
-//   // Average regression coefficients ----------------------
-//   for(r=0; r<dat.nr; r++){
-//     beta  = th.beta.slice(r);                                          // np x nbase
-//     betat = Bs * trans(beta);                                          // nt x np
-//     hat.beta.slice(r)  = w1*betat + w2*hat.beta.slice(r);              // nt x np
-//     hat.beta2.slice(r) = w1*betat%betat + w2*hat.beta2.slice(r);       // nt x np
-//   }
-// }
+/***********************************************************************************/
+/* ErgodicAverages()                                                               */
+/***********************************************************************************/
+void ErgodicAveragesV(mat const& Bs)
+{
+  int i, r, t;
+  mat beta1, beta2;
+  vec tj, tji;
+  //
+  ww1 = 1.0/(1.0 + hatv.n);
+  ww2 = 1.0 - ww1;
+  hatv.n++;
+  //
+  // Average fit ------------------------------------------
+  hatv.fit  = ww1*thv.fit + ww2*hatv.fit;
+  hatv.beta2= ww1*thv.beta+ ww2*hatv.beta2;
+  hatv.L    = ww1*thv.Ld + ww2*hatv.L;
+  cube lcube= cubexmat(thv.Ld, thv.H);
+  //
+  for(i=0; i<datv.ns; i++){
+    beta1 = thv.mbi.slice(i) * trans(Bs);                       //p*nt
+    beta2 = (thv.mbi.slice(i) + lcube.slice(i)) * trans(Bs);    //p*nt
+    for(r=0; r<datv.nr; r++){
+      for(t=0; t<datv.nt; t++){
+        hatv.beta(i,r,t) = ww1*beta1(r,t) + ww2*hatv.beta(i,r,t);
+        // hatv.beta2(i,r,t)= w1*std::pow(beta1(r,t), 2.0) + w2*hatv.beta2(i,r,t);
+        hatv.betai(i,r,t)= ww1*beta2(r,t) + ww2*hatv.betai(i,r,t);
+      }
+    }
+  }
+}
 
 /***********************************************************************************/
 /* OutputSample()                                                                  */
@@ -241,31 +260,27 @@ void sampleFactors(cube &y, mat const& Bs)
 void OutputSampleV()
 {
   int j, r, p;
-  // mat invS;
-  // { // Population Splines --------------------------------
-  //   std::stringstream ss;
-  //   for(p=0; p<datv.np; p++){
-  //     for(r=0; r<dat.nr; r++){
-  //       for(j=0; j<th.nbase; j++){
-  //         ss << th.beta(p,j,r) << " ";
-  //       }
-  //     }
-  //   }
-  //   ss << "\n"; out1 << ss.str();
-  // }
+  { // Population Splines --------------------------------
+    std::stringstream ss;
+    for(p=0; p<datv.np; p++){
+      for(r=0; r<datv.nr; r++){
+        for(j=0; j<thv.nbase; j++){
+          ss << thv.beta(r,j,p) << " ";
+        }
+      }
+    }
+    ss << "\n"; outv1 << ss.str();
+  }
   { // Precisions ----------------------------------------
     std::stringstream ss;
-    ss << thv.sige << " ";          // Error covs;
+    ss << thv.taue << " ";          // Error covs;
     for(r=0; r<datv.nr; r++){
-      ss << thv.Sigp(r,r) << " ";   // Spatial res covs;
+      ss << thv.taup(r,r) << " ";   // Spatial res covs;
     }
     for(j=0; j<thv.nbase; j++){
-      ss << thv.Sigq(j,j) << " ";   // Temp res covs;
+      ss << thv.tauq(j,j) << " ";   // Temp res covs;
     }
-    for(p=0; p<thv.nfac; p++){
-      ss << thv.pen(p) << " ";      // penalty;
-    }
-    ss << "\n"; outv3 << ss.str();
+    ss << "\n"; outv2 << ss.str();
   }
   { // Factors -------------------------------------------
     std::stringstream ss;
@@ -274,17 +289,19 @@ void OutputSampleV()
         ss << thv.H(r,j) << " "; // Spatial matrix
       }
     }
+    for(p=0; p<thv.nfac; p++){
+      ss << thv.pen(p) << " ";      // penalty;
+    }
     ss << "\n"; outv4 << ss.str();
   }
 }
-
+//
 // Vectorized HFMM
 /***********************************************************************************/
 /* vmix_mcmc()                                                                     */
 /***********************************************************************************/
-
 // [[Rcpp::export]]
-void vmix_mcmc(arma::cube y, 
+List vmix_mcmc(arma::cube y, 
                arma::mat const& X, 
                arma::mat const& Bs,
                int const& nfac,
@@ -292,9 +309,7 @@ void vmix_mcmc(arma::cube y,
                )
 {
   // vmix var declaration:
-  int i, j, r;                // Indices
-//   mat W, D, D2;               // AR matrices
-//   vec rho;                    // regularization eigenvalues
+  int i, j, r;               // Indices
   // Get initialization summaries ---------------------------------------------------
   datv.ns = y.n_rows;           // number of subjects
   datv.nr = y.n_cols;           // number of regions
@@ -309,44 +324,28 @@ void vmix_mcmc(arma::cube y,
   /* ----------------------------------------------------------------------------- */
   //
   // Prior parameters -----------------------------------------------
-  prv.ae = 0.00001;         prv.be = 0.00001;             // Error variance
+  prv.ae = 0.0001;         prv.be = 0.0001;               // Error variance
   prv.athe = 0.001;         prv.bthe = 0.001;             // coeff res row/col var
   prv.ap1= 1.5;             prv.ap2= 1.5;                 // penalties
   prv.aOm= 1.0;                                           // --------------could be less informative
   prv.Om0= eye<mat>(datv.nr, datv.nr) * 1.0;              // spatial smoothing
   prv.eta0 = zeros<vec>(thv.nfac);                        // Latent factor priors
-
-//   // Smoothing Matrix (AR-1) ----------------------------------------//needed for Beta's
-//   W  = eye<mat>(th.nbase, th.nbase)*1.0;
-//   D  = eye<mat>(th.nbase, th.nbase)*3.0;
-//   D2 = eye<mat>(th.nbase, th.nbase)*1.0;
-//   // AR1 adjecency -----------------------------------
-//   for(i=1; i<th.nbase; i++){ W(i,(i-1)) = 1.0; }
-//   for(i=0; i<(th.nbase-1); i++){ W(i,(i+1)) = 1.0; }
-//   // AR1 no. neighbors -------------------------------
-//   D(0,0) = D((th.nbase-1),(th.nbase-1)) = 2.0;
-//   // Regularizing eigenvalue -------------------------
-//   for(i=0; i<th.nbase; i++) D2(i,i) = std::pow(D(i,i), -0.5);
-//   rho = randu<vec>(th.nbase);
-//   eig_sym(rho, D2*W*D2);
-//   // Final penalization matrix -----------------------
-//   th.Df = (D - rho[(th.nbase-2)]*W)*10.0;
-
+  //
   // Initialize missing data ----------------------------------------
   {
-    vec rn1, yir;
+    vec rn1, yit;
     datv.miss = icube(datv.ns, datv.nr, datv.nt);
     datv.nmiss= vec(datv.ns);
-    yir = randu<vec>(datv.ns);
+    yit = randu<vec>(datv.ns);
     for(i=0; i<datv.ns; i++){
       for(r=0; r<datv.nr; r++){
-        yir = y.tube(i,r);
+        yit = y.tube(i,r);
         for(j=0; j<datv.nt; j++){
           datv.miss(i,r,j) = 0;
-          if( yir(j)==12345.12345 ){
+          if( yit(j)==12345.12345 ){
             datv.miss(i,r,j) = 1;
             rn1 = randn(1)*0.5;
-            y(i,r,j) = meanNA(yir) + rn1(0);
+            y(i,r,j) = meanNA(yit) + rn1(0);
           }
         }
       }
@@ -355,68 +354,49 @@ void vmix_mcmc(arma::cube y,
   }
   // RANDOM initialization                            // ----------------------
   thv.H   = randu<mat>(datv.ns, nfac);                // Latent factors
-  thv.Ld  = randu<mat>(datv.nr*thv.nbase, nfac);      // Loading matrix
+  thv.Ld  = randu<cube>(datv.nr, thv.nbase, nfac);    // Loading matrix
   thv.HtH = trans(thv.H) * thv.H;
-  thv.bi  = randu<cube>(datv.ns, datv.nr, thv.nbase); // basis functions
-  thv.mbi = randu<cube>(datv.ns, datv.nr, thv.nbase); // mean bases funcs
+  thv.bi  = randu<cube>(datv.nr, thv.nbase, datv.ns); // basis functions
+  thv.mbi = randu<cube>(datv.nr, thv.nbase, datv.ns); // mean bases funcs
   thv.fit = randu<cube>(datv.ns, datv.nr, datv.nt);   // current fit
-  thv.beta= randu<cube>(datv.np, thv.nbase, datv.nr); // Group means
+  thv.beta= randu<cube>(datv.nr, thv.nbase, datv.np); // Group means
   thv.Omega=randu<cube>(datv.nr, datv.nr, thv.nbase); // Spatial correlations
   thv.BtB = trans(Bs)*Bs;
   thv.iBtB= pinv(thv.BtB);
-  thv.sige= 1.0/Rf_rgamma(prv.ae, 1.0/prv.be);        // Residual covs
-  thv.Sigp= eye(datv.ns, datv.ns);
-  thv.Sigq= eye(thv.nbase, thv.nbase);
+  thv.taue= Rf_rgamma(prv.ae, 1.0/prv.be);        // Residual covs
+  thv.taup= 0.001*eye(datv.nr, datv.nr);
+  thv.tauq= 0.001*eye(thv.nbase, thv.nbase);
+  thv.pen = randu<vec>(nfac);
+  for(i=0; i<nfac; i++){thv.pen[i] = Rf_rgamma(prv.ap1, 1.0/prv.ap2);}
+  for(j=0; j<thv.nbase; j++){thv.Omega.slice(j) = eye<mat>(datv.nr, datv.nr);}
   // Meaningful initialization:                       // ----------------------
-//   bir    = randu<vec>(th.nbase);
-//   for(i=0; i<dat.ns; i++){
-//     for(r=0; r<dat.nr; r++){
-//       yir = y.tube(i,r);
-//       bir = solve((th.BtB + th.lbi*th.Df), trans(Bs)*yir);
-//       th.bi.tube(i,r) = bir;
-//       th.fit.tube(i,r) = Bs*bir;
-//     }
-//   }
-//   // Error Precision and Spatial Covariance -------------------------
-//   double err;
-//   int nn1 = dat.ns*dat.nt;
-//   th.He   = zeros<mat>(dat.nr, dat.nr);
-//   for(r=0; r<dat.nr; r++){
-//     err = 0.0;
-//     for(i=0; i<dat.ns; i++){
-//       for(j=0; j<dat.nt; j++){
-//         err += pow(y(i,r,j) - th.fit(i,r,j), 2.0)/nn1;
-//       } // j
-//     } //i
-//     th.He(r,r) = 5.0/err;
-//   }
-//   th.S = eye<mat>(dat.nr, dat.nr)*1.0;
-//   // Population means means and smoothing ---------------------------
-//   th.lbeta = 0.01/(dat.ns*dat.nr);
-//   th.beta  = randu<cube>(dat.np, th.nbase, dat.nr);
-//   th.XtX   = trans(X)*X;
-//   mat br   = randu<mat>(dat.ns, th.nbase);
-//   for(r=0; r<dat.nr; r++){
-//     br               = longslice(th.bi, r);
-//     th.beta.slice(r) = solve(th.XtX , trans(X)*br);
-//   };
-//   th.mbi   = randu<cube>(dat.ns, dat.nr, th.nbase);
-//
-//   // Initialize and decompose regression matrices -------------------
-//   th.XtXi   = pinv(th.XtX);           // (X'X)^-1
-//   th.cholXX = chol(th.XtXi);          // Cholesky of (X'X)^-1 (upper)
-//   th.cholDf = chol(pinv(th.Df));      // Cholesky of Df^-1 (upper)
-//
-//   // Initialize ergodics --------------------------------------------
-//   hat.n     = 0.0;
-//   hat.beta  = randu<cube>(dat.nt, dat.np, dat.nr);
-//   hat.beta2 = randu<cube>(dat.nt, dat.np, dat.nr);
-//   hat.fit   = randu<cube>(dat.ns, dat.nr, dat.nt);
-//
+  bit    = randu<vec>(thv.nbase);
+  for(i=0; i<datv.ns; i++){
+    for(r=0; r<datv.nr; r++){
+      yit = y.tube(i,r);
+      bit = solve((thv.BtB + thv.taue * eye<mat>(thv.nbase, thv.nbase)), trans(Bs)*yit);
+      for(j=0; j<thv.nbase; j++){
+        thv.bi(r,j,i) = bit[j];
+      }
+      thv.fit.tube(i,r) = vectorise(Bs*bit);
+    }
+  }
+  //
+  // Initialize and decompose regression matrices -------------------
+  thv.X     = X;                      // X
+  thv.XtXi  = pinv(trans(X)*X);       // pinv(X'X)
+  // Initialize ergodics --------------------------------------------
+  hatv.n     = 0.0;
+  hatv.beta  = randu<cube>(datv.ns, datv.nr, datv.nt);
+  hatv.beta2 = randu<cube>(datv.nr, thv.nbase, datv.np);
+  hatv.betai = randu<cube>(datv.ns, datv.nr, datv.nt);
+  hatv.L     = randu<cube>(datv.nr, thv.nbase, thv.nfac);
+  hatv.fit   = randu<cube>(datv.ns, datv.nr, datv.nt);
+
   // Open output files ----------------------------------------------
   outv1.open(fileOutput1);
   outv2.open(fileOutput2);
-  outv3.open(fileOutput3);
+  // outv3.open(fileOutput3);
   outv4.open(fileOutput4);
   /* ----------------------------------------------------------------------------- */
   /* Gibbs Sampling                                                                */
@@ -424,7 +404,7 @@ void vmix_mcmc(arma::cube y,
 
   for(int rep=0; rep<(nsim+burnin+1); rep++){
     // mcmc samples --------------------
-    completeY2(y, Bs);
+    completeY2(y);
     sampleLoadings();
     sampleFacCovs();
     sampleErrCovs(y);
@@ -433,17 +413,18 @@ void vmix_mcmc(arma::cube y,
     // Store mcmc samples --------------
     if( (rep > burnin) && (rep%thin == 0) ){
       OutputSampleV();           // Write mcmc samples to file
-      // ErgodicAverages(Bs);      // Update ergodic averages
+      ErgodicAveragesV(Bs);      // Update ergodic averages
     }
   }
   // Close output files ---------------------------------------------
-  outv1.close(); outv2.close(); outv3.close(); outv4.close();
+  outv1.close(); outv2.close(); outv4.close(); // outv3.close();
 
-//   // Output to R --------------------------------------------------------------------
-//   return List::create(
-//     Named("fit")      = hat.fit,
-//     Named("coef")     = hat.beta,
-//     Named("coef2")    = hat.beta2);
+  // Output to R --------------------------------------------------------------------
+  return List::create(
+    Named("fit")      = hatv.fit,
+    Named("coef")     = hatv.beta2,
+    Named("gmean")    = hatv.beta,
+    Named("imean")    = hatv.betai);
 }
 
 // // END vmix_mcmc --------------------------------------------------------------------

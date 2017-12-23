@@ -48,9 +48,10 @@ BEGIN_RCPP
 END_RCPP
 }
 // vmix_mcmc
-void vmix_mcmc(arma::cube y, arma::mat const& X, arma::mat const& Bs, int const& nfac, int const& burnin, int const& nsim, int const& thin);
+List vmix_mcmc(arma::cube y, arma::mat const& X, arma::mat const& Bs, int const& nfac, int const& burnin, int const& nsim, int const& thin);
 RcppExport SEXP _HFMM_vmix_mcmc(SEXP ySEXP, SEXP XSEXP, SEXP BsSEXP, SEXP nfacSEXP, SEXP burninSEXP, SEXP nsimSEXP, SEXP thinSEXP) {
 BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< arma::cube >::type y(ySEXP);
     Rcpp::traits::input_parameter< arma::mat const& >::type X(XSEXP);
@@ -59,8 +60,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int const& >::type burnin(burninSEXP);
     Rcpp::traits::input_parameter< int const& >::type nsim(nsimSEXP);
     Rcpp::traits::input_parameter< int const& >::type thin(thinSEXP);
-    vmix_mcmc(y, X, Bs, nfac, burnin, nsim, thin);
-    return R_NilValue;
+    rcpp_result_gen = Rcpp::wrap(vmix_mcmc(y, X, Bs, nfac, burnin, nsim, thin));
+    return rcpp_result_gen;
 END_RCPP
 }
 

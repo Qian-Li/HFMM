@@ -67,7 +67,7 @@ void samplePrecisions(cube &y, bool const& spatial)
     b    = pr.be;
     for(i=0; i<dat.ns; i++){
       for(int t=0; t<dat.nt; t++){
-        b += (dat.miss(i,r,t)==0)? std::pow(resE(i,t),2.0) : 0.0;
+        b += (dat.miss(i,r,t)==0)? std::pow(resE(i,t),2.0) : 0.0;// ********0.5 here?
       }
     }
     h1   = rgamma(1, a, 1.0/b);

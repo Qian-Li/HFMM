@@ -14,6 +14,6 @@ smix_mcmc <- function() {
 }
 
 vmix_mcmc <- function(y, X, Bs, nfac, burnin, nsim, thin) {
-    invisible(.Call(`_HFMM_vmix_mcmc`, y, X, Bs, nfac, burnin, nsim, thin))
+    .Call(`_HFMM_vmix_mcmc`, y, X, Bs, nfac, burnin, nsim, thin)
 }
 

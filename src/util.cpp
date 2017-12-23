@@ -166,7 +166,7 @@ mat cov2cor(mat S)
 /* vec2mat()                                                                       */
 /* column-wise matricization                                                       */
 /***********************************************************************************/
-mat vec2mat(vec const &v, int const& nr, int const& nc)
+mat vec2mat(vec &v, int const& nr, int const& nc)
 {
   int i, j, index;
   mat out(nr,nc);
@@ -178,5 +178,74 @@ mat vec2mat(vec const &v, int const& nr, int const& nc)
   }
   return out;
 }
-
-
+/***********************************************************************************/
+/* vec2long()                                                                      */
+/* feeding vector to longslice of cube a(i,j,k)                                    */
+/***********************************************************************************/
+void vec2long(cube &a, vec const &v, int const& j)
+{
+  int i, k, index;
+  int nr = a.n_rows;
+  int ns = a.n_slices;
+  for(k=0; k<ns; k++){
+    for(i=0; i<nr; i++){
+      index = nr*k+i;
+      a(i,j,k) = v[index];
+    }
+  }
+}
+/***********************************************************************************/
+/* cubexmat()                                                                      */
+/* cube(a,b,c) multiplies mat(d,c)                                                 */
+/***********************************************************************************/
+cube cubexmat(cube &c, mat const&m)
+{
+  int nr,nc,ns,i,j,k;
+  mat tmp, bmat;
+  nr = c.n_rows;
+  nc = c.n_cols;
+  ns = m.n_rows;
+  cube out(nr,nc,ns);
+  for(j=0;j<nc;j++){
+    bmat = longslice(c, j); // a*c
+    tmp  = bmat * trans(m); // a*d
+    for(i=0;i<nr;i++){
+      for(k=0;k<ns;k++){
+        out(i,j,k) = tmp(i,k);
+      }
+    }
+  }
+  return out;
+}
+/***********************************************************************************/
+/* cube2mat()                                                                      */
+/* cube(a,b,c) into ab * c                                                         */
+/***********************************************************************************/
+mat cube2mat(cube const &c)
+{
+  int nr = c.n_rows;
+  int nc = c.n_cols;
+  int ns = c.n_slices;
+  mat out(nr*nc, ns);
+  vec temp(nr*nc);
+  for(int i=0; i<ns; i++){
+    temp = vectorise(c.slice(i));
+    out.col(i) = conv_to< colvec >::from(temp);
+  }
+  return out;
+}
+/***********************************************************************************/
+/* mat2cube()                                                                      */
+/* mat(a*b,c) into cube(a,b,c)                                                     */
+/***********************************************************************************/
+cube mat2cube(mat const &m, int const& nr, int const& nc)
+{ 
+  int ns = m.n_cols;
+  cube out(nr,nc,ns);
+  vec temp;
+  for(int s=0; s<ns; s++){
+    temp = vectorise(m.col(s));
+    out.slice(s) = vec2mat(temp, nr, nc);
+  }
+  return out;
+}
