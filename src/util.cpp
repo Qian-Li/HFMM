@@ -275,7 +275,7 @@ mat safechol(mat const& S){
   while(success == false){
     success = chol(L, SS, "lower");
     if(success == false){
-      SS += eye(S.n_rows, S.n_rows) * 1e-6;
+      SS += eye(S.n_rows, S.n_rows) * 1e-2;
     }
   }
   return L;

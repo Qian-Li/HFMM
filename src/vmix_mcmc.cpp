@@ -34,6 +34,7 @@ int       i,r,j,k,l,t,s;
 ofstream outv1;
 ofstream outv2;
 ofstream outv3;
+ofstream f("log.txt");
 //
 /***********************************************************************************/
 /* completeY2()                                                                    */
@@ -520,7 +521,9 @@ List vmix_mcmc(arma::cube y,
                int const& nfac,
                int const& burnin, int const& nsim, int const& thin
                )
-{ // number of factors in v;
+{ 
+  set_cerr_stream(f);
+  // number of factors in v;
   thv.nfac  = nfac;             // number of latent factors
   /* ----------------------------------------------------------------------------- */
   /* Initialize Chain and static summaries                                         */
@@ -584,7 +587,9 @@ List smix_mcmc(arma::cube y,
                int const& nfacL, int const& nfacR,
                int const& burnin, int const& nsim, int const& thin
 )
-{ // number of factors in v;
+{
+  set_cerr_stream(f);
+  // number of factors in v;
   ths.nfacL  = nfacL; ths.nfacR  = nfacR;                // number of latent factors
   /* ----------------------------------------------------------------------------- */
   /* Initialize Chain and static summaries                                         */
