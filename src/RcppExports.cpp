@@ -38,15 +38,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// smix_mcmc
-void smix_mcmc();
-RcppExport SEXP _HFMM_smix_mcmc() {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    smix_mcmc();
-    return R_NilValue;
-END_RCPP
-}
 // vmix_mcmc
 List vmix_mcmc(arma::cube y, arma::mat const& X, arma::mat const& Bs, int const& nfac, int const& burnin, int const& nsim, int const& thin);
 RcppExport SEXP _HFMM_vmix_mcmc(SEXP ySEXP, SEXP XSEXP, SEXP BsSEXP, SEXP nfacSEXP, SEXP burninSEXP, SEXP nsimSEXP, SEXP thinSEXP) {
@@ -64,12 +55,30 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// smix_mcmc
+List smix_mcmc(arma::cube y, arma::mat const& X, arma::mat const& Bs, int const& nfacL, int const& nfacR, int const& burnin, int const& nsim, int const& thin);
+RcppExport SEXP _HFMM_smix_mcmc(SEXP ySEXP, SEXP XSEXP, SEXP BsSEXP, SEXP nfacLSEXP, SEXP nfacRSEXP, SEXP burninSEXP, SEXP nsimSEXP, SEXP thinSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::cube >::type y(ySEXP);
+    Rcpp::traits::input_parameter< arma::mat const& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< arma::mat const& >::type Bs(BsSEXP);
+    Rcpp::traits::input_parameter< int const& >::type nfacL(nfacLSEXP);
+    Rcpp::traits::input_parameter< int const& >::type nfacR(nfacRSEXP);
+    Rcpp::traits::input_parameter< int const& >::type burnin(burninSEXP);
+    Rcpp::traits::input_parameter< int const& >::type nsim(nsimSEXP);
+    Rcpp::traits::input_parameter< int const& >::type thin(thinSEXP);
+    rcpp_result_gen = Rcpp::wrap(smix_mcmc(y, X, Bs, nfacL, nfacR, burnin, nsim, thin));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_HFMM_bands_cpp", (DL_FUNC) &_HFMM_bands_cpp, 5},
     {"_HFMM_hmix_mcmc", (DL_FUNC) &_HFMM_hmix_mcmc, 7},
-    {"_HFMM_smix_mcmc", (DL_FUNC) &_HFMM_smix_mcmc, 0},
     {"_HFMM_vmix_mcmc", (DL_FUNC) &_HFMM_vmix_mcmc, 7},
+    {"_HFMM_smix_mcmc", (DL_FUNC) &_HFMM_smix_mcmc, 8},
     {NULL, NULL, 0}
 };
 

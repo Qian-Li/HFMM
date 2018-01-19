@@ -9,11 +9,11 @@ hmix_mcmc <- function(y, X, Bs, burnin, nsim, thin, spatial = TRUE) {
     .Call(`_HFMM_hmix_mcmc`, y, X, Bs, burnin, nsim, thin, spatial)
 }
 
-smix_mcmc <- function() {
-    invisible(.Call(`_HFMM_smix_mcmc`))
-}
-
 vmix_mcmc <- function(y, X, Bs, nfac, burnin, nsim, thin) {
     .Call(`_HFMM_vmix_mcmc`, y, X, Bs, nfac, burnin, nsim, thin)
+}
+
+smix_mcmc <- function(y, X, Bs, nfacL, nfacR, burnin, nsim, thin) {
+    .Call(`_HFMM_smix_mcmc`, y, X, Bs, nfacL, nfacR, burnin, nsim, thin)
 }
 

@@ -103,17 +103,23 @@ vfm <- function(y, t, X, nsegs, nLF = NULL, knots=NULL, mcmc=NULL){
     mcmc$nsim   <- 2000
     mcmc$thin   <- 1
   }
-  if(is.null(nLF)){
-    nLF = nreg * nbase / 2.0;
+  if(length(nLF) == 2){
+    nLF = ceiling(nLF)
+    ## sandwich HFMM- MCMC---
+    cppfit = smix_mcmc(y3, X, BSX, nLF[1], nLF[2], mcmc$burnin, mcmc$nsim, mcmc$thin)
+  } else if(length(nLF == 1)){
+    nLF = ceiling(nLF)
+    ## vectorized HFMM- MCMC---
+    cppfit <- vmix_mcmc(y3, X, BSX, nLF,mcmc$burnin, mcmc$nsim, mcmc$thin)
+  } else {
+    nLF = ceiling(nreg * nbase / 2.0);
+    warning('Number of Latent Factors not given, default nLF = ',nLF)
+    ## vectorized HFMM- MCMC---
+    cppfit <- vmix_mcmc(y3, X, BSX, nLF,mcmc$burnin, mcmc$nsim, mcmc$thin)
   }
-  nLF = ceiling(nLF);
-  ## Run MCMC -----------------------------------------------------------------
-  #
-  fit1 <- vmix_mcmc(y3, X, BSX, nLF,mcmc$burnin, mcmc$nsim, mcmc$thin)
-  #
   ## END MCMC -----------------------------------------------------------------
   y3[is.na(y3_b)] <- NA;
-  return(list(fit=fit1$fit, coef=fit1$coef, gfit=fit1$gmean, ifit=fit1$imean, y=y3, t=x1, Bs=BSX, nsim=mcmc$nsim))
+  return(list(fit=cppfit$fit, coef=cppfit$coef, gfit=cppfit$gmean, ifit=cppfit$imean, y=y3, t=x1, Bs=BSX, nsim=mcmc$nsim))
   # return(nLF)
 }
 

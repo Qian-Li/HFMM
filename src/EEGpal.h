@@ -48,29 +48,46 @@ struct pars{
     mat cholXX;     // Cholesky of X'X
     mat cholDf;     // Cholesky of Df
 };
-struct parsV{
-   // Model parameters for vectorized model -----------------------------------------
-   cube bi;         // Individual coefficient
-   cube mbi;        // Individual mean coefficient (fixed)
-   cube beta;       // Coefficients mean;
-   cube Ld;         // Latent Factor loading
-   mat H;           // Latent Factors
-   mat taup;        // Regional precision, diagonal
-   mat tauq;        // Temporal precision, diagonal
-   cube Omega;      // Spatial covariance, free
-   vec pen;         // Column covariance penalty on Loadings
-   double taue;     // System error variances
-   mat HtH;         // H'H
-   // Static Summaries --------------------------------------------------------------
-   int nfac;        // Number of factors;
-   int nbase;       // Number of basis functions;
-   cube fit;        // Current sub-level fit
-   mat BtB;         // Bs'Bs;
-   mat iBtB;        // pinv(Bs'Bs);
-   mat XtXi;        // pinv(X'X)
-   mat X;           // design matrix X
+struct modelpars{
+  // Model parameters shared by both V&S implementations
+  cube bi;         // Individual coefficient
+  cube mbi;        // Individual mean coefficient (fixed)
+  cube beta;       // Coefficients mean;
+  double taue;     // System error variances;
+  mat taup;        // coef residual precision, diagonal
+  mat tauq;        // coef residual precision, diagonal
+  // Static Summaries --------------------------------------------------------------
+  int nbase;       // Number of basis functions;
+  cube fit;        // Current sub-level fit
+  mat BtB;         // Bs'Bs;
+  mat iBtB;        // pinv(Bs'Bs);
+  mat XtXi;        // pinv(X'X)
+  mat X;           // design matrix X
 };
-
+struct parsV{
+  // Parameters specific to vectorized implementation
+  cube Ld;         // Latent Factor loading
+  mat H;           // Latent Factors
+  cube Omega;      // Spatial covariance, free
+  vec pen;         // Column covariance penalty on Loadings
+  mat HtH;         // H'H
+  // static
+  int nfac;        // Number of factors;
+};
+struct parsS{
+  // Parameters specific to sandwich implementation
+  mat LL;          // Latent Factor loading, Left
+  mat LR;          // Latent Factor loading, Right
+  cube H;          // Latent Factors
+  mat tauL;        // Precision, Left
+  mat tauR;        // Precision, Right
+  vec penL;        // Penalty, Left
+  vec penR;        // Penalty, Right
+  // mat HtH;         // H'H
+  // Static Summaries --------------------------------------------------------------
+  int nfacL;       // Number of factors;
+  int nfacR;       // Number of factors;  
+};
 /************************************************************************************/
 /* Prior Structure                                                                  */
 /************************************************************************************/
@@ -111,6 +128,27 @@ struct priorV{
   // Latent factors;
   vec eta0;
 };
+struct priorS{
+  // Prior for vectorized models
+  // Error variance
+  double ae;
+  double be;
+  
+  // Coefficients variances (Sigp and Sigq)
+  double athe;
+  double bthe;
+  
+  // Penalties shapes, the first and the rest
+  double ap1;
+  double ap2;
+  
+  // Loading precision
+  double nuL;
+  double nuR;
+  
+  // Latent factors;
+  vec eta0;
+};
 
 /************************************************************************************/
 /* Estimate Structure                                                               */
@@ -127,7 +165,7 @@ struct ergodicsV{
   cube beta;    // Group mean fit, (mbi) * Bs'
   cube beta2;   // Spline coefficients
   cube betai;   // Individual mean fit (mbi + Lambda eta) * Bs'
-  cube L;       // E(lf)
+  // cube L;       // E(lf)
   double n;     // sampel included for ergodics sum
 };
 
@@ -148,7 +186,9 @@ mat vec2mat(vec &v, int const& nr, int const& nc);
 cube mat2cube(mat const &m, int const& nr, int const& nc);
 void vec2long(cube &a, vec const &v, int const& j);
 cube cubexmat(cube &c, mat const&m);
+cube matxcube(mat const& L, cube const&C, mat const&R);
 mat cube2mat(cube const &c);
+mat safechol(mat const& S);
 //
 // slicing of Armadillo cubes ---------------------------
 mat longslice(cube &A, int r);

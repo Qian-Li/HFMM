@@ -218,6 +218,21 @@ cube cubexmat(cube &c, mat const&m)
   return out;
 }
 /***********************************************************************************/
+/* matxcube()                                                                      */
+/* cube(a,b,c) multiplies mat(d,c)                                                 */
+/***********************************************************************************/
+cube matxcube(mat const& L, cube const&C, mat const&R)
+{
+  int nr = L.n_rows;
+  int nc = R.n_cols;
+  int ns = C.n_slices;
+  cube out(nr,nc,ns);
+  for(int i=0; i<ns; i++){
+    out.slice(i) = L * C.slice(i) * R;
+  }
+  return out;
+}
+/***********************************************************************************/
 /* cube2mat()                                                                      */
 /* cube(a,b,c) into ab * c                                                         */
 /***********************************************************************************/
@@ -248,4 +263,20 @@ cube mat2cube(mat const &m, int const& nr, int const& nc)
     out.slice(s) = vec2mat(temp, nr, nc);
   }
   return out;
+}
+/***********************************************************************************/
+/* safechol()                                                                      */
+/* safely perform choleskey decomp                                                 */
+/***********************************************************************************/
+mat safechol(mat const& S){
+  mat L;
+  mat SS = S;
+  bool success = false;
+  while(success == false){
+    success = chol(L, SS, "lower");
+    if(success == false){
+      SS += eye(S.n_rows, S.n_rows) * 1e-6;
+    }
+  }
+  return L;
 }
